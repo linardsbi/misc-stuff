@@ -1,0 +1,234 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+  <title>Heater | Manage</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    h2 {
+      color: white;
+      border: 2px solid white;
+      padding: .5em;
+      border-radius: 30px;
+    }
+
+    h3 {
+      border-bottom: 3px solid white;
+      padding-bottom: .8em;
+      font-weight: bolder;
+      margin-bottom: 0.8em;
+    }
+
+    h3 {
+      margin-top: 0;
+    }
+
+    .spacer {
+      padding: .5em;
+    }
+
+    label {
+      font-weight: bold;
+    }
+
+    body {
+      text-align: center;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      font-size: x-large;
+      overflow-x: hidden;
+      background-color: #181818;
+      color: white;
+      box-sizing: border-box;
+      max-width: 100vw;
+      justify-content: center;
+    }
+
+    main {
+      width: 100%;
+      padding: 1em;
+      max-width: 800px;
+    }
+
+    section {
+      display: flex;
+      align-items: center;
+      flex-direction: column;
+      gap: 0.8em;
+      padding: 1em;
+      border-radius: 30px;
+      border: 2px solid white;
+    }
+
+    .sensor-values {
+      &>div {
+        display: flex;
+        gap: .5em;
+      }
+
+      & span {
+        font-weight: bold;
+      }
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: .3em;
+    }
+
+    #temp-limit {
+      height: 20px;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      border-radius: 5px;
+
+      &::-webkit-progress-value,
+      &::-moz-progress-bar {
+        background: #ba9e6c;
+      }
+    }
+    .heater-btn {
+      width: 60px;
+      height: 30px;
+      background: gray;
+      transition: background-color 150ms;
+      border-radius: 30px;
+      position: relative;
+      cursor: pointer;
+      &::after {
+        content: '';
+        width: calc(100% / 2 - 5px);
+        height: calc(100% - 5px);
+        position: absolute;
+        left: 5px;
+        background-color: #181818;
+        border-radius: 50%;
+        top: 10%;
+        transition: left 250ms;
+      }
+      &:has(input:checked) {
+        background: #ba9e6c;
+        &::after {
+          left: calc(100% - 30px);
+        }
+      }
+    }
+    #heater-value {
+      display: none;
+    }
+    .deg {
+      font-weight: normal;
+      font-size: .6em;
+      vertical-align: super;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <header>
+      <h2>Manage heater settings</h2>
+    </header>
+    <section class="heater-settings">
+      <h3>Temperature limit</h3>
+      <div class="bar">
+        <progress id="temp-limit" value="0" max="100"></progress>
+        <span id="temp-limit-value">Not connected</span>
+      </div>
+    </section>
+    <div class="spacer"></div>
+    <section class="sensor-values">
+      <h3>Current sensor values</h3>
+      <div><span>Temperature:</span>
+        <div id="temp-value">Not connected</div><div><span class="deg">o</span>C</div>
+      </div>
+      <div><span>Humidity:</span>
+        <div id="humidity-value">Not connected</div>
+      </div>
+      <div><span>Heater:</span><label class="heater-btn" for="heater-value"><input type="checkbox" id="heater-value" /></label></div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const sendDebounce = 300;
+      const minTemp = 14;
+      const maxTemp = 26;
+      let lastSent = 0;
+      let timeout = null;
+
+      async function sendValue(field, value) {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+
+        timeout = setTimeout(async () => {
+          const data = new FormData();
+          data.set(field, parseInt(value));
+
+          const response = await fetch('/set', {
+            method: 'POST',
+            body: data
+          });
+
+          if (!response.ok) {
+            if (response.statusText) {
+              alert(`Error: ${response.statusText}`);
+            } else {
+              alert('Error: could not set value');
+            }
+          }
+        }, sendDebounce);
+      }
+
+      document.getElementById('heater-value').addEventListener('change', function () {
+        sendValue('heater-value', Number(this.checked));
+      });
+
+      document.getElementById('temp-limit').addEventListener('click', function (e) {
+        const progressValue = (e.offsetX / this.clientWidth);
+        const output = (maxTemp - minTemp) * progressValue + minTemp;
+
+        this.value = progressValue * 100;
+        document.getElementById('temp-limit-value').innerText = output.toFixed(1);
+
+        sendValue('temp-limit-value', output * 10);
+      });
+
+      function setProgressValue(currentTemp) {
+        const value = (currentTemp - minTemp) / (maxTemp - minTemp) * 100;
+        document.getElementById('temp-limit').value = value;
+      }
+
+      setInterval(() => {
+        const fetchValues = async () => {
+          const setters = [
+            ([field, value]) => {
+              const currentTemp = Number(value) / 10;
+              document.getElementById(field).innerText = currentTemp.toFixed(1);
+              setProgressValue(currentTemp);
+            },
+            ([field, value]) => document.getElementById(field).innerText = (Number(value) / 10).toFixed(1),
+            ([field, value]) => document.getElementById(field).innerText = Math.round(Number(value)).toString() + '%',
+            ([field, value]) => document.getElementById(field).checked = Number(value) > 0,
+          ];
+
+          const response = await fetch('/data');
+          const data = await response.text();
+
+          data
+            .split(',')
+            .map((pair) => pair.split('='))
+            .map((kv, i) => setters[i] && setters[i](kv));
+        };
+
+        fetchValues();
+      }, 3000);
+    })();
+  </script>
+</body>
+
+</html>
